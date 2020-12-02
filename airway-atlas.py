@@ -24,9 +24,11 @@ mpl.rcParams.update(mpl.rcParamsDefault)
 mpl.rcParams.update({
     'font.sans-serif': 'Arial',
     'font.family': 'sans-serif',
-    'font.size': 14,
-    'axes.titlesize': 19,
+    'axes.titlesize': 18,
+    'axes.labelsize': 18,
+    'font.size': 18,
     })
+
 
 #%%
 df = pd.read_csv('data/raw-data/airway-atlas/exprMatrix.tsv', sep='\t', index_col=0,)
@@ -113,8 +115,8 @@ any_tmprss_meta = ((adata.to_df()[proteases] > 0).sum(axis=1) > 0)
 any_tmprss_meta = any_tmprss_meta.map({True: 'Present', False: 'Absent'}).astype('category').cat.reorder_categories(['Present', 'Absent'])
 adata.obs['any_tmprss_metagene'] = any_tmprss_meta
 fig = sc.pl.tsne(adata, color='any_tmprss_metagene',
-   title='Any S-activating Protease',   sort_order=True,
-   palette=['#000000', '#DCDCDC'],
+   title='TTSP-expressing cells',   sort_order=True,
+   palette=['#1fb5f0', '#DCDCDC'],
    size=25,
    groups=['Present'],
    save='_' + 'tmprss_metagene' + '_all.png',
@@ -122,10 +124,13 @@ fig = sc.pl.tsne(adata, color='any_tmprss_metagene',
    show=False)
 
 
-legend_elements = [plt.Line2D([0], [0], marker='o', color='#000000', label='Present', linestyle='None'),
-                   plt.Line2D([0],[0], marker='o', color='#DCDCDC', label='Absent', markerfacecolor='#DCDCDC', linestyle='None')]
-fig.axes[0].legend(handles=legend_elements, loc='lower right')
-fig.savefig(os.path.join(sc.settings.figdir, 'tsne_tmprss_metagene_all.pdf'), bbox_inches='tight')
+legend_elements = [plt.Line2D([0], [0], marker='o', color='#1fb5f0', label='TTSP-positive', linestyle='None'),
+                   plt.Line2D([0],[0], marker='o', color='#DCDCDC', label='TTSP-negative', markerfacecolor='#DCDCDC', linestyle='None')]
+fig.axes[0].legend(handles=legend_elements, frameon=False,
+                loc='center left',
+                bbox_to_anchor=(1, 0.5),)
+plt.show()
+fig.savefig(os.path.join(sc.settings.figdir, 'tsne_tmprss_metagene_all-ttsp.pdf'), bbox_inches='tight')
 
 #%%
 sc.tl.rank_genes_groups(adata, 'leiden', method='t-test', n_genes=20)
@@ -152,7 +157,7 @@ cluster_labels.loc[cluster_labels['label'].isna(),'label'] = cluster_labels.loc[
 cluster_labels_dict = cluster_labels.set_index('cluster')['label'].to_dict()
 adata.obs['Cell Types'] = adata.obs.leiden.map(cluster_labels_dict).astype('category')
 
-# change colors a bit for clarity
+# change secretory cell color
 adata.uns['Cell Types_colors'][15] = '#9370DB' #smg serous
 adata.uns['Cell Types_colors'][16] = '#FF4A46' #secretory
 adata.uns['Cell Types_colors'][12] = '#809693' #nasal suprabasal
@@ -184,6 +189,7 @@ x_labels_axis.set_xticks(xticks)
 
 ax.set_xlabel('')
 
+
 plt.savefig(os.path.join(sc.settings.figdir, 'tracksplot_cell_types.pdf'), bbox_inches='tight', format='pdf')
 
 #%%
@@ -193,4 +199,38 @@ adata = sc.read_h5ad(os.path.join(sc.settings.figdir, 'adata.h5ad'))
 sc.tl.rank_genes_groups(adata, 'Cell Types', method='t-test', n_genes=20)
 pd.DataFrame(adata.uns['rank_genes_groups']['names']).to_csv(os.path.join(sc.settings.figdir, 'labeled_clusters_rank_groups.csv'))
 adata.write(os.path.join(sc.settings.figdir, 'adata.h5ad'))
+
+#%% Nov 2020 revisions
+
+sc.pl.tsne(adata, color='EPCAM', size=25, color_map='plasma', save='_epcam.pdf')
+           
+epcam = adata.obs[['Cell Types']].join(adata.to_df()[['EPCAM']])
+epcam_rank = epcam.groupby('Cell Types').apply(np.average).sort_values(ascending=False)
+epcam_rank.to_csv(os.path.join(sc.settings.figdir, 'epcam_ranks.csv'))
+#%%
+epithelial_cell_types = list(epcam_rank[epcam_rank > .3].index)
+adata.obs['epithelial'] = adata.obs['Cell Types'].isin(epithelial_cell_types)
+adata.obs['epithelial'] = adata.obs['epithelial'].where(adata.obs['epithelial'], 'Non-epithelial')
+adata.obs['epithelial'] = adata.obs['epithelial'].where(adata.obs['epithelial'] == 'Non-epithelial', 'Epithelial').astype(pd.CategoricalDtype())
+adata.uns['epithelial_colors'] = ['#f76f68', '#bdbdbd']
+fig, ax = plt.subplots()
+sc.pl.tsne(adata, color='epithelial', size=25, ax=ax, title='Epithelial cells')
+plt.savefig(os.path.join(sc.settings.figdir, 'epithelial_highlighted.pdf'), bbox_inches='tight') 
+#nasal and above highlighted
+#highlight within the epithlelial the proteases
+
+#%%
+adata.uns['any_tmprss_metagene_colors'] = ['#1fb5f0', '#bdbdbd']
+sc.pl.tsne(adata, color='any_tmprss_metagene', size=25, title='TTSP-expressing cells', groups=['Present', 'Absent'])
+#%%
+adata.obs['epith+protease'] = adata.obs['epithelial'].copy().astype('str')
+adata.obs.loc[(adata.obs['epithelial'] == 'Epithelial') & (adata.obs['any_tmprss_metagene'] == 'Present'), 'epith+protease'] = 'Epithelial and TTSP-expressing'
+adata.obs.loc[(adata.obs['epithelial'] == 'Epithelial') & (adata.obs['any_tmprss_metagene'] == 'Absent'), 'epith+protease'] = 'Epithelial and TTSP-negative'
+adata.obs.loc[(adata.obs['epithelial'] == 'Non-epithelial') & (adata.obs['any_tmprss_metagene'] == 'Present'), 'epith+protease'] = 'Non-epithelial and TTSP-expressing'
+adata.obs['epith+protease'] = adata.obs['epith+protease'].astype(pd.CategoricalDtype(['Non-epithelial', 'Non-epithelial and TTSP-expressing', 'Epithelial and TTSP-negative', 'Epithelial and TTSP-expressing'], ordered=True))
+adata.uns['epith+protease_colors'] = [ '#bdbdbd', '#000000', '#f76f68','#1fb5f0']
+fig, ax = plt.subplots()
+sc.pl.tsne(adata, color='epith+protease', size=25, ax=ax, save='_epith_ttsp_status')
+
+
 
